@@ -1,7 +1,7 @@
 {
   "name": "nexusmind-ai-backend",
   "version": "1.0.0",
-  "description": "Webhook for answering insurance policy questions from PDF",
+  "description": "Fast PDF Q&A webhook for HackRx",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
