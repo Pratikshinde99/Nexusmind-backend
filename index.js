@@ -1,78 +1,64 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const axios = require('axios');
-const pdfParse = require('pdf-parse');
+const express = require("express");
+const axios = require("axios");
+const pdf = require("pdf-parse");
+const cors = require("cors");
 
 const app = express();
-app.use(bodyParser.json());
+app.use(cors());
+app.use(express.json());
 
-const stopWords = new Set([
-  'the', 'is', 'at', 'which', 'on', 'and', 'a', 'an', 'for', 'to', 'of', 'in', 'that', 'it',
-  'with', 'as', 'this', 'by', 'from', 'are', 'was', 'be', 'or', 'has', 'have', 'not'
-]);
+const PORT = process.env.PORT || 10000;
 
-function extractKeywords(text) {
-  return text
-    .toLowerCase()
-    .replace(/[^\w\s]/g, '') // remove punctuation
-    .split(/\s+/)
-    .filter(word => word.length > 2 && !stopWords.has(word));
+function cleanText(text) {
+  return text.replace(/\n+/g, " ").replace(/\s+/g, " ").trim();
 }
 
-app.post('/hackrx/run', async (req, res) => {
-  const { documents, questions } = req.body;
+function extractAnswer(pdfText, question) {
+  const keywords = question.toLowerCase().split(" ").filter(w => w.length > 3);
+  const lines = pdfText.split(". ");
+  
+  let bestMatch = "";
+  let maxMatches = 0;
 
-  if (!documents || !questions || !Array.isArray(questions)) {
-    return res.status(400).json({ error: 'Invalid input' });
+  for (let line of lines) {
+    let count = 0;
+    const l = line.toLowerCase();
+    for (let word of keywords) {
+      if (l.includes(word)) count++;
+    }
+    if (count > maxMatches) {
+      maxMatches = count;
+      bestMatch = line;
+    }
   }
 
+  return bestMatch.length > 30 ? bestMatch.trim() : "Answer not found in document";
+}
+
+app.post("/hackrx/run", async (req, res) => {
   try {
-    // Fetch PDF buffer
-    const pdfBuffer = (await axios.get(documents, { responseType: 'arraybuffer' })).data;
+    const { documents, questions } = req.body;
 
-    // Extract text from PDF
-    const pdfData = await pdfParse(pdfBuffer);
-    const text = pdfData.text;
+    if (!documents || !questions || !Array.isArray(questions)) {
+      return res.status(400).json({ error: "Invalid input" });
+    }
 
-    // Split text into paragraphs (chunks of text separated by 1+ empty lines)
-    const paragraphs = text.split(/\n\s*\n/).map(p => p.trim()).filter(p => p.length > 20);
-
-    const answers = questions.map(question => {
-      const qKeywords = extractKeywords(question);
-
-      let bestParagraph = '';
-      let bestScore = 0;
-
-      for (const para of paragraphs) {
-        const paraLower = para.toLowerCase();
-        // Count how many keywords appear in paragraph
-        let score = 0;
-        for (const kw of qKeywords) {
-          if (paraLower.includes(kw)) {
-            score++;
-          }
-        }
-        if (score > bestScore) {
-          bestScore = score;
-          bestParagraph = para;
-        }
-      }
-
-      // If no paragraph matches well, return "Answer not found in document"
-      if (bestScore === 0) {
-        return "Answer not found in document";
-      }
-      return bestParagraph;
+    const pdfResponse = await axios.get(documents, {
+      responseType: "arraybuffer",
     });
 
-    return res.json({ answers });
+    const data = await pdf(pdfResponse.data);
+    const text = cleanText(data.text);
+
+    const answers = questions.map(q => extractAnswer(text, q));
+
+    res.json({ answers });
   } catch (error) {
-    console.error('Webhook Error:', error.message);
-    return res.status(500).json({ error: 'Failed to process document' });
+    console.error("Error:", error.message);
+    res.status(500).json({ error: "Failed to process PDF" });
   }
 });
 
-const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`🚀 Webhook running on port ${PORT}`);
+  console.log(`🚀 NexusMind AI webhook running on port ${PORT}`);
 });
